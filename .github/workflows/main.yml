@@ -14,12 +14,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: wangyoucao577/go-release-action@v1.39
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          goos: linux
-          goarch: arm64
-          goversion: "1.23"
-          binary_name: "iptest"
-          ldflags: -s -w -X "main.version=${{ github.ref_name }}"
-          md5sum: false
+          go-version: '1.23.1' # 指定精确的 Go 版本
+
+      - name: Build for Linux arm64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+          CGO_ENABLED: 0 # 禁用 CGO，确保静态链接
+        run: |
+          go build -o iptest -ldflags="-s -w -X main.version=${{ github.ref_name }}" .
+          file iptest # 验证二进制文件架构
+          tar -czvf iptest-linux-arm64.tar.gz iptest
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iptest-linux-arm64
+          path: iptest-linux-arm64.tar.gz
+          retention-days: 5
+
+      - name: Create Release and Upload Asset
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: iptest-linux-arm64.tar.gz
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
