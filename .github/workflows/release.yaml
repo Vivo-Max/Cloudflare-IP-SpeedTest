@@ -1,67 +1,56 @@
-name: build
+#!/bin/bash
 
-on:
-  release:
-    types: [created] # 表示在创建新的 Release 时触发
+# 工作流文件：speedtest_workflow.sh
+# 用途：手动运行 iptest.sh 测速，捕获日志并推送 CSV 到 Git 仓库
 
-permissions:
-  contents: write
-  packages: write
+# 定义变量
+IPTEST_SCRIPT="./iptest.sh"        # iptest.sh 脚本路径
+IPTEST_BINARY="./iptest"           # iptest 二进制文件路径
+LOG_FILE="./speedtest.log"         # 实时日志文件
+REPO_DIR="."                       # Git 仓库目录（当前目录）
 
-jobs:
-  build-go-binary:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux, windows, darwin] # 需要打包的系统
-        goarch: [amd64, arm64, arm, mips, mips64, mips64le, mipsle, 386] # 需要打包的架构
-        exclude: # 排除某些平台和架构
-          - goarch: arm64
-            goos: windows
-          - goarch: 386
-            goos: darwin
-          # arm 排除
-          - goarch: arm
-            goos: windows
-          - goarch: arm
-            goos: darwin
+# 检查 iptest.sh 是否存在
+if [ ! -f "$IPTEST_SCRIPT" ]; then
+    echo "错误：$IPTEST_SCRIPT 不存在！" | tee -a "$LOG_FILE"
+    exit 1
+fi
 
-          # windows、darwin、android 排除 mips, mips64, mips64le, mipsle
-          - goarch: mips
-            goos: windows
-          - goarch: mips64
-            goos: windows
-          - goarch: mips64le
-            goos: windows
-          - goarch: mipsle
-            goos: windows
+# 检查 iptest 二进制文件是否存在
+if [ ! -f "$IPTEST_BINARY" ]; then
+    echo "错误：$IPTEST_BINARY 不存在！" | tee -a "$LOG_FILE"
+    exit 1
+fi
 
-          - goarch: mips
-            goos: darwin
-          - goarch: mips64
-            goos: darwin
-          - goarch: mips64le
-            goos: darwin
-          - goarch: mipsle
-            goos: darwin
+# 赋予执行权限
+echo "赋予执行权限给 $IPTEST_SCRIPT 和 $IPTEST_BINARY" | tee -a "$LOG_FILE"
+chmod +x "$IPTEST_SCRIPT" "$IPTEST_BINARY"
 
-          - goarch: mips
-            goos: android
-          - goarch: mips64
-            goos: android
-          - goarch: mips64le
-            goos: android
-          - goarch: mipsle
-            goos: android
+# 运行 iptest.sh，捕获实时输出
+echo "开始测速：$(date)" | tee -a "$LOG_FILE"
+bash "$IPTEST_SCRIPT" 2>&1 | tee -a "$LOG_FILE"
+EXIT_CODE=${PIPESTATUS[0]}  # 捕获 bash 命令的退出码
 
-    steps:
-      - uses: actions/checkout@v3
-      - uses: wangyoucao577/go-release-action@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }} # 一个默认的变量，用来实现往 Release 中添加文件
-          goos: ${{ matrix.goos }}
-          goarch: ${{ matrix.goarch }}
-          goversion: 1.21 # 可以指定编译使用的 Golang 版本
-          binary_name: "iptest" # 可以指定二进制文件的名称
-          ldflags: -s -w -X "main.version=${{ github.ref_name }}"
-          md5sum: false
+# 检查测速是否成功
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "测速失败，退出码：$EXIT_CODE" | tee -a "$LOG_FILE"
+    exit $EXIT_CODE
+fi
+echo "测速完成：$(date)" | tee -a "$LOG_FILE"
+
+# 推送 CSV 到 Git 仓库
+echo "开始推送 CSV 文件到仓库" | tee -a "$LOG_FILE"
+cd "$REPO_DIR" || { echo "无法进入仓库目录 $REPO_DIR" | tee -a "$LOG_FILE"; exit 1; }
+
+# 添加 CSV 文件（假设 iptest.sh 已指定输出文件名）
+git add "*.csv" || { echo "Git add 失败" | tee -a "$LOG_FILE"; exit 1; }
+git commit -m "Speedtest results $(date '+%Y-%m-%d %H:%M:%S')" || {
+    echo "Git commit 失败，无新文件或仓库问题" | tee -a "$LOG_FILE"
+    exit 1
+}
+git push origin main || {
+    echo "Git push 失败，请检查网络或仓库配置" | tee -a "$LOG_FILE"
+    exit 1
+}
+echo "成功推送 CSV 文件到仓库：$(date)" | tee -a "$LOG_FILE"
+
+exit 0
